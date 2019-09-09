@@ -2,19 +2,7 @@ pub mod game;
 
 #[cfg(test)]
 mod tests {
-    use super::game::{Game, Cell};
-    
-    #[test]
-    #[should_panic]
-    fn it_does_not_generate_1_by_x_boards() {
-        let _ = Game::new(1, 1000);
-    }
-
-    #[test]
-    #[should_panic]
-    fn it_does_not_generate_x_by_1_boards() {
-        let _ = Game::new(1000, 1);
-    }
+    use super::game::{Game, GameState, Cell};
 
     #[test]
     fn it_generates_gameboard() {
@@ -22,6 +10,8 @@ mod tests {
         assert_eq!(1000, g.board.len());
         assert_eq!(1000, g.board[0].len());
         assert_eq!(1000, g.board[999].len());
+
+        assert_eq!(g.state, GameState::New);
     }
 
     #[test]
@@ -30,6 +20,47 @@ mod tests {
             vec![Cell::Alive, Cell::Alive],
             vec![Cell::Dead, Cell::Alive]
         ]);
+    }
+
+    #[test]
+    fn it_oscillates_patterns() {
+        let mut g = Game::from_board(vec![
+            vec![Cell::Dead, Cell::Alive, Cell::Dead],
+            vec![Cell::Dead, Cell::Alive, Cell::Dead],
+            vec![Cell::Dead, Cell::Alive, Cell::Dead]
+        ]);
+
+        for _ in 0..100 {
+            g.next();
+        }
+
+        assert_eq!(g.state, GameState::Running);
+    }
+
+    #[test]
+    fn it_goes_extinct() {
+        let mut g = Game::from_board(vec![
+            vec![Cell::Dead, Cell::Dead],
+            vec![Cell::Dead, Cell::Dead]
+        ]);
+
+        g.next();
+
+        assert_eq!(g.state, GameState::Extinct);
+    }
+
+    #[test]
+    fn it_goes_stalemated() {
+        let mut g = Game::from_board(vec![
+            vec![Cell::Alive, Cell::Alive],
+            vec![Cell::Alive, Cell::Alive]
+        ]);
+
+        for _ in 0..5 {
+            g.next();
+        }
+
+        assert_eq!(g.state, GameState::Stalemated);
     }
 
     #[test]
