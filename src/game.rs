@@ -1,4 +1,9 @@
-use std::fmt;
+use core::fmt;
+use core::iter::repeat;
+use core::sync::atomic::{ AtomicBool, Ordering };
+
+#[cfg(rayon)]
+use rayon::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Cell {
@@ -23,26 +28,47 @@ pub struct Game {
 }
 
 impl Game {
+  #[cfg(rayon)]
   pub fn new(x: usize, y: usize) -> Game {
-    let mut board = Vec::new();
-    board.reserve(x);
-
-    for _ in 0..x {
-      let mut r = Vec::new();
-      r.reserve(y);
-
-      for _ in 0..y {
-        if rand::random() {
-          r.push(Cell::Dead)
-        } else {
-          r.push(Cell::Alive)
-        }
-      }
-      board.push(r);
-    }
-
     Game {
-      board,
+      board:
+        (0..x)
+        .into_par_iter()
+        .map(|_| {
+          (0..y)
+            .into_par_iter()
+            .map(|_| {
+              if rand::random() {
+                Cell::Dead
+              } else {
+                Cell::Alive
+              }
+            })
+            .collect()
+        })
+        .collect(),
+      state: GameState::New,
+      iteration: 0
+    }
+  }
+
+  #[cfg(not(rayon))]
+  pub fn new(x: usize, y: usize) -> Game {
+    Game {
+      board:
+        (0..x)
+        .map(|_| {
+          (0..y)
+            .map(|_| {
+              if rand::random() {
+                Cell::Dead
+              } else {
+                Cell::Alive
+              }
+            })
+            .collect()
+        })
+        .collect(),
       state: GameState::New,
       iteration: 0
     }
@@ -56,97 +82,100 @@ impl Game {
     }
   }
 
+  #[cfg(rayon)]
   pub fn next(&mut self) {
 
     match self.state {
       GameState::Stalemated | GameState::Extinct => return,
       _ => {}
     };
-    
-    // We must calculate the state of the next board 
-    // Without modifying the current state.
 
     let board_len = self.board.len();
 
-    let mut r = Vec::new();
-    let mut has_changed = false;
-    let mut all_blank = true;
-    r.reserve(board_len);
+    let all_blank = AtomicBool::new(true);
+    let has_changed = AtomicBool::new(false);
 
-    for i in 0..board_len {
-      let board_i_len = self.board[i].len();
+    self.board = self.board
+      .par_iter()
+      .enumerate()
+      .map(|(i, r)| {
+        let board_i_len = r.len();
 
-      let mut b = Vec::new();
-      b.reserve(board_i_len);
+        r.par_iter()
+          .enumerate()
+          .map(|(j, c)| {
+            let mut count = 0;
 
-      for j in 0..board_i_len {
-        let mut c = 0;
+            if i != 0 {
+              if j != 0 {
+                if self.board[i-1][j-1] == Cell::Alive {
+                  count += 1;
+                }
+              }
+              if j != board_i_len - 1 {
+                if self.board[i-1][j+1] == Cell::Alive {
+                  count += 1;
+                }
+              }
 
-        if i != 0 {
-          if j != 0 {
-            if self.board[i-1][j-1] == Cell::Alive {
-              c += 1;
+              if self.board[i-1][j] == Cell::Alive {
+                count += 1;
+              }
             }
-          }
-          if j != board_i_len - 1 {
-            if self.board[i-1][j+1] == Cell::Alive {
-              c += 1;
+
+            if i != board_len - 1 {
+              if j != 0 {
+                if self.board[i+1][j-1] == Cell::Alive {
+                  count += 1;
+                }
+              }
+
+              if j != board_i_len -1 { 
+                if self.board[i+1][j+1] == Cell::Alive {
+                  count += 1;
+                }
+              }
+
+              if self.board[i+1][j] == Cell::Alive {
+                count += 1;
+              }
             }
-          }
 
-          if self.board[i-1][j] == Cell::Alive {
-            c += 1;
-          }
-        }
-
-        if i != board_len - 1 {
-          if j != 0 {
-            if self.board[i+1][j-1] == Cell::Alive {
-              c += 1;
+            if j != 0 {
+              if self.board[i][j-1] == Cell::Alive {
+                count += 1;
+              }
             }
-          }
-
-          if j != board_i_len -1 { 
-            if self.board[i+1][j+1] == Cell::Alive {
-              c += 1;
+            if j != board_i_len - 1 {
+              if self.board[i][j+1] == Cell::Alive {
+                count += 1;
+              }
             }
-          }
 
-          if self.board[i+1][j] == Cell::Alive {
-            c += 1;
-          }
-        }
+            let next_state = match c {
+              Cell::Alive if count < 2 => Cell::Dead,
+              Cell::Alive if (count == 2 || count == 3) => Cell::Alive,
+              Cell::Alive => Cell::Dead,
+              Cell::Dead if count == 3 => Cell::Alive,
+              _ => Cell::Dead
+            };
 
-        if j != 0 {
-          if self.board[i][j-1] == Cell::Alive {
-            c += 1;
-          }
-        }
-        if j != board_i_len - 1 {
-          if self.board[i][j+1] == Cell::Alive {
-            c += 1;
-          }
-        }
+            if next_state != *c {
+              has_changed.compare_and_swap(false, true, Ordering::Relaxed);
+            }
+            
+            if next_state == Cell::Alive {
+              all_blank.compare_and_swap(true, false, Ordering::Relaxed);
+            }
 
-        let next_state = match self.board[i][j] {
-          Cell::Alive if c < 2 => Cell::Dead,
-          Cell::Alive if (c == 2 || c == 3) => Cell::Alive,
-          Cell::Alive => Cell::Dead,
-          Cell::Dead if c == 3 => Cell::Alive,
-          _ => Cell::Dead
-        };
+            next_state
+          })
+          .collect()
+      })
+      .collect();
 
-        if next_state != self.board[i][j] {
-          has_changed = true;
-        }
-        if next_state == Cell::Alive {
-          all_blank = false;
-        }
-
-        b.push(next_state);
-      }
-      r.push(b);
-    }
+    let all_blank = all_blank.load(Ordering::Relaxed);
+    let has_changed = has_changed.load(Ordering::Relaxed);
 
     self.state = match self.state {
       GameState::New | GameState::Running if all_blank => GameState::Extinct,
@@ -156,8 +185,110 @@ impl Game {
     };
 
     self.iteration += 1;
+  }
 
-    self.board = r;
+  #[cfg(not(rayon))]
+  pub fn next(&mut self) {
+    match self.state {
+      GameState::Stalemated | GameState::Extinct => return,
+      _ => {}
+    };
+
+    let board_len = self.board.len();
+
+    let all_blank = AtomicBool::new(true);
+    let has_changed = AtomicBool::new(false);
+
+    self.board = self.board
+      .iter()
+      .enumerate()
+      .map(|(i, r)| {
+        let board_i_len = r.len();
+
+        r.iter()
+          .enumerate()
+          .map(|(j, c)| {
+            let mut count = 0;
+
+            if i != 0 {
+              if j != 0 {
+                if self.board[i-1][j-1] == Cell::Alive {
+                  count += 1;
+                }
+              }
+              if j != board_i_len - 1 {
+                if self.board[i-1][j+1] == Cell::Alive {
+                  count += 1;
+                }
+              }
+
+              if self.board[i-1][j] == Cell::Alive {
+                count += 1;
+              }
+            }
+
+            if i != board_len - 1 {
+              if j != 0 {
+                if self.board[i+1][j-1] == Cell::Alive {
+                  count += 1;
+                }
+              }
+
+              if j != board_i_len -1 { 
+                if self.board[i+1][j+1] == Cell::Alive {
+                  count += 1;
+                }
+              }
+
+              if self.board[i+1][j] == Cell::Alive {
+                count += 1;
+              }
+            }
+
+            if j != 0 {
+              if self.board[i][j-1] == Cell::Alive {
+                count += 1;
+              }
+            }
+            if j != board_i_len - 1 {
+              if self.board[i][j+1] == Cell::Alive {
+                count += 1;
+              }
+            }
+
+            let next_state = match c {
+              Cell::Alive if count < 2 => Cell::Dead,
+              Cell::Alive if (count == 2 || count == 3) => Cell::Alive,
+              Cell::Alive => Cell::Dead,
+              Cell::Dead if count == 3 => Cell::Alive,
+              _ => Cell::Dead
+            };
+
+            if next_state != *c {
+              has_changed.compare_and_swap(false, true, Ordering::Relaxed);
+            }
+            
+            if next_state == Cell::Alive {
+              all_blank.compare_and_swap(true, false, Ordering::Relaxed);
+            }
+
+            next_state
+          })
+          .collect()
+      })
+      .collect();
+
+    let all_blank = all_blank.load(Ordering::Relaxed);
+    let has_changed = has_changed.load(Ordering::Relaxed);
+
+    self.state = match self.state {
+      GameState::New | GameState::Running if all_blank => GameState::Extinct,
+      GameState::New | GameState::Running if !has_changed => GameState::Stalemated,
+      GameState::New => GameState::Running,
+      _ => GameState::Running
+    };
+
+    self.iteration += 1;
   }
 }
 
@@ -170,10 +301,10 @@ impl fmt::Display for Game {
       GameState::Stalemated => "Stalemated"
     })?;
 
-    writeln!(f, "{}", std::iter::repeat('=').take(self.board.len()).collect::<String>())?;
+    writeln!(f, "{}", repeat('=').take(self.board.len()).collect::<String>())?;
     for r in self.board.iter() {
       writeln!(f, "{}", r.iter().map(|v| match v { Cell::Alive => '#', _ => ' '}).collect::<String>())?;
     }
-    writeln!(f, "{}", std::iter::repeat('=').take(self.board.len()).collect::<String>())
+    writeln!(f, "{}", repeat('=').take(self.board.len()).collect::<String>())
   }
 }

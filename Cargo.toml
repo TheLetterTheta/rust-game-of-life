@@ -4,8 +4,12 @@ version = "0.1.0"
 authors = ["Nick Dolan <nicholas.dolan1@gmail.com>"]
 edition = "2018"
 
+[features]
+default = ["rayon"]
+
 [dependencies]
-rand = "0.7.0"
+rand = { version = "0.7.0", default-features = false, features = ["std", "wasm-bindgen"] }
+rayon = { version = "1.2", optional = true }
 
 [dev-dependencies]
 criterion = "0.3"

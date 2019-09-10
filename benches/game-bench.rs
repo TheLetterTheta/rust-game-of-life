@@ -11,7 +11,21 @@ pub fn criterion_benchmark(c: &mut Criterion) {
   let mut g = Game::new(10,10);
 
   c.bench_function("Game Iterations", |b| b.iter(|| {
-    for _ in 0..10000 {
+    for _ in 0..1000 {
+      black_box(g.next())
+    }
+  }));
+
+  let mut g = Game::new(10,10);
+  c.bench_function("Large Game Iterations", |b| b.iter(|| {
+    for _ in 0..1000000 {
+      black_box(g.next())
+    }
+  }));
+
+  let mut g = Game::new(100,100);
+  c.bench_function("Large Game board Iterations", |b| b.iter(|| {
+    for _ in 0..100 {
       black_box(g.next())
     }
   }));

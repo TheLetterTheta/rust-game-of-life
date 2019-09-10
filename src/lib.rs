@@ -30,7 +30,7 @@ mod tests {
             vec![Cell::Dead, Cell::Alive, Cell::Dead]
         ]);
 
-        for _ in 0..100 {
+        for _ in 0..1000 {
             g.next();
         }
 
